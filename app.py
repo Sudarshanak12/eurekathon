@@ -1,106 +1,194 @@
-import streamlit as st
-import pandas as pd
-from sklearn.ensemble import IsolationForest
+import streamlit as st # type: ignore
+import sqlite3
+import bcrypt # type: ignore
+import pandas as pd # type: ignore
+import numpy as np # type: ignore
+import re
+import time
+import matplotlib.pyplot as plt # type: ignore
 
-st.set_page_config(page_title="Smart Spend Analyzer", layout="wide")
+# ---------------- THEME ----------------
+st.set_page_config(page_title="Smart Spend AI", layout="wide")
 
-st.title("💰 Smart Spend Analyzer")
+st.markdown("""
+<style>
+body {background-color:#f5f0e6;}
+.stButton>button {background-color:#8b6f47;color:white;border-radius:10px;}
+</style>
+""", unsafe_allow_html=True)
 
+# ---------------- DATABASE ----------------
+conn = sqlite3.connect("users.db", check_same_thread=False)
+c = conn.cursor()
+c.execute("""CREATE TABLE IF NOT EXISTS users(
+username TEXT,
+password BLOB
+)""")
+conn.commit()
 
-@st.cache_data
-def load_data():
-    return pd.read_csv("Personal_Finance_Dataset.csv")
+# ---------------- VALIDATION ----------------
+def valid_username(u):
+    return bool(re.match(r"^[A-Za-z0-9_]{4,20}$", u))
 
-df = load_data()
+def password_strength(p):
+    score=0
+    if re.search(r"[A-Z]",p): score+=1
+    if re.search(r"[a-z]",p): score+=1
+    if re.search(r"\d",p): score+=1
+    if re.search(r"[^\w]",p): score+=1
+    return ["Weak","Medium","Strong","Very Strong"][score-1] if score>0 else "Weak"
 
+def valid_password(p):
+    return len(p)>=8 and \
+        re.search(r"[A-Z]",p) and \
+        re.search(r"[a-z]",p) and \
+        re.search(r"\d",p) and \
+        re.search(r"[^\w]",p)
 
-df.columns = df.columns.str.strip()
+# ---------------- SESSION ----------------
+if "user" not in st.session_state:
+    st.session_state.user=None
 
-rename_map = {}
+# ---------------- AUTH PAGES ----------------
+def register():
+    st.title("Register")
 
-if "transaction_amount" in df.columns:
-    rename_map["transaction_amount"] = "Amount"
-if "category" in df.columns:
-    rename_map["category"] = "Category"
-if "subcategory" in df.columns:
-    rename_map["subcategory"] = "Subcategory"
+    u=st.text_input("Username")
+    p=st.text_input("Password",type="password")
+    cp=st.text_input("Confirm Password",type="password")
 
-df.rename(columns=rename_map, inplace=True)
+    if u:
+        if not valid_username(u):
+            st.error("Invalid username format")
 
+    if p:
+        st.write("Strength:",password_strength(p))
 
-if "Amount" not in df.columns or "Category" not in df.columns:
-    st.error("Dataset must contain 'Amount' and 'Category' columns")
-    st.stop()
+    if st.button("Create Account"):
 
+        if not valid_username(u):
+            st.error("Invalid username")
+            return
 
-st.sidebar.header("Filter Transactions")
+        if not valid_password(p):
+            st.error("Weak password")
+            return
 
-categories = st.sidebar.multiselect(
-    "Select Category",
-    options=df["Category"].unique(),
-    default=df["Category"].unique()
-)
+        if p!=cp:
+            st.error("Passwords do not match")
+            return
 
-filtered = df[df["Category"].isin(categories)]
+        c.execute("SELECT * FROM users WHERE username=?",(u,))
+        if c.fetchone():
+            st.error("Username exists")
+            return
 
+        hashed=bcrypt.hashpw(p.encode(),bcrypt.gensalt())
+        c.execute("INSERT INTO users VALUES(?,?)",(u,hashed))
+        conn.commit()
 
-st.subheader("📊 Overview")
+        st.success("Account created")
 
-col1, col2, col3 = st.columns(3)
+def login():
+    st.title("Login")
+    u=st.text_input("Username")
+    p=st.text_input("Password",type="password")
 
-col1.metric("Total Spend", f"₹{filtered['Amount'].sum():,.2f}")
-col2.metric("Transactions", len(filtered))
-col3.metric("Average", f"₹{filtered['Amount'].mean():.2f}")
+    if st.button("Login"):
 
+        c.execute("SELECT password FROM users WHERE username=?",(u,))
+        result=c.fetchone()
 
-st.subheader("Category Breakdown")
+        time.sleep(1)
 
-cat_sum = filtered.groupby("Category")["Amount"].sum()
-st.bar_chart(cat_sum)
+        if result and bcrypt.checkpw(p.encode(),result[0]):
+            st.session_state.user=u
+            st.success("Logged in")
+            st.rerun()
+        else:
+            st.error("Invalid credentials")
 
+# ---------------- MAIN APP ----------------
+def dashboard():
 
+    st.title("Smart Spend AI")
 
-if "Subcategory" in filtered.columns:
-    st.subheader("Sub-Category Breakdown")
-    sub_sum = filtered.groupby("Subcategory")["Amount"].sum()
-    st.bar_chart(sub_sum)
+    categories = {
+        "Individual":["Food","Transport","Rent","Subscription","Entertainment","Investments"],
+        "Business":["Operational","Salaries","Utilities","Vendors","Tax","Inventory"],
+        "Trip":["Transport","Accommodation","Food","Local","Activities","Shopping"],
+        "Family":["Groceries","Fees","Healthcare","Insurance","Utilities","Maintenance"]
+    }
 
+    mode=st.selectbox("Select Mode", list(categories.keys()))
+    sub=st.selectbox("Subcategory", categories[mode])
+    amt=st.number_input("Amount",step=1.0)
 
-st.subheader("🚨 Unusual Transactions")
+    if "data" not in st.session_state:
+        st.session_state.data=[]
 
-try:
-    model = IsolationForest(contamination=0.05, random_state=42)
-    model.fit(filtered[["Amount"]])
+    if st.button("Add"):
+        st.session_state.data.append([mode,sub,amt])
 
-    filtered["Anomaly"] = model.predict(filtered[["Amount"]])
-    anomalies = filtered[filtered["Anomaly"] == -1]
+    if st.session_state.data:
 
-    if anomalies.empty:
-        st.success("No unusual transactions detected ✅")
-    else:
-        st.warning(f"{len(anomalies)} unusual transactions found")
-        st.dataframe(anomalies)
+        df=pd.DataFrame(st.session_state.data,
+                        columns=["Mode","Subcategory","Amount"])
 
-except:
-    st.error("Anomaly detection failed. Ensure Amount column is numeric.")
+        st.subheader("Transactions")
+        st.dataframe(df)
 
+        # pie
+        st.subheader("Spending Distribution")
+        fig1,ax1=plt.subplots()
+        df.groupby("Subcategory")["Amount"].sum().plot.pie(autopct="%1.1f%%",ax=ax1)
+        st.pyplot(fig1)
 
-st.subheader(" Financial Health Summary")
+        # trend
+        st.subheader("Trend")
+        fig2,ax2=plt.subplots()
+        df["Amount"].plot(ax=ax2)
+        st.pyplot(fig2)
 
-total = filtered["Amount"].sum()
-avg = filtered["Amount"].mean()
-top = filtered.groupby("Category")["Amount"].sum().idxmax()
+        # anomaly
+        mean=df.Amount.mean()
+        std=df.Amount.std()
 
-summary = f"""
-You spent a total of ₹{total:.2f}.
-Your highest spending category is {top}.
-Your average transaction amount is ₹{avg:.2f}.
+        df["Anomaly"]=df.Amount.apply(
+            lambda x:"⚠️" if abs(x-mean)>2*std else "Normal")
 
-Tip: Consider reducing spending in your top category to improve savings.
-"""
+        st.subheader("Anomaly Detection")
+        st.dataframe(df)
 
-st.info(summary)
+        # score
+        score=100
+        if df.Amount.sum()>50000:
+            score-=25
 
+        st.metric("Financial Health Score",score)
 
-with st.expander("View Raw Data"):
-    st.dataframe(filtered)
+        # summary
+        st.subheader("Summary")
+        st.write(f"""
+Total spending ₹{df.Amount.sum():.2f}
+
+Highest category:
+{df.groupby("Subcategory")["Amount"].sum().idxmax()}
+
+Suggestion:
+Reduce unnecessary spending and monitor anomalies.
+""")
+
+    if st.button("Logout"):
+        st.session_state.user=None
+        st.rerun()
+
+# ---------------- ROUTING ----------------
+if st.session_state.user is None:
+
+    tab1,tab2=st.tabs(["Login","Register"])
+    with tab1: login()
+    with tab2: register()
+
+else:
+    dashboard()
