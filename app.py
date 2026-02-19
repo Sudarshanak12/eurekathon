@@ -1,23 +1,20 @@
 import streamlit as st
 import pandas as pd
-import joblib
+from sklearn.ensemble import IsolationForest
 
 st.set_page_config(page_title="Smart Spend Analyzer", layout="wide")
 
-st.title(" Smart Spend Analyzer")
-
+st.title("💰 Smart Spend Analyzer")
 
 
 @st.cache_data
 def load_data():
-    df = pd.read_csv("Personal_Finance_Dataset.csv")
-    return df
+    return pd.read_csv("Personal_Finance_Dataset.csv")
 
 df = load_data()
 
 
 df.columns = df.columns.str.strip()
-
 
 rename_map = {}
 
@@ -31,17 +28,10 @@ if "subcategory" in df.columns:
 df.rename(columns=rename_map, inplace=True)
 
 
-required = ["Amount", "Category"]
-for col in required:
-    if col not in df.columns:
-        st.error(f"Dataset must contain column: {col}")
-        st.stop()
+if "Amount" not in df.columns or "Category" not in df.columns:
+    st.error("Dataset must contain 'Amount' and 'Category' columns")
+    st.stop()
 
-
-try:
-    model = joblib.load("anomaly_model.pkl")
-except:
-    model = None
 
 st.sidebar.header("Filter Transactions")
 
@@ -69,28 +59,30 @@ cat_sum = filtered.groupby("Category")["Amount"].sum()
 st.bar_chart(cat_sum)
 
 
+
 if "Subcategory" in filtered.columns:
     st.subheader("Sub-Category Breakdown")
     sub_sum = filtered.groupby("Subcategory")["Amount"].sum()
     st.bar_chart(sub_sum)
 
 
-st.subheader(" Unusual Transactions")
+st.subheader("🚨 Unusual Transactions")
 
-if model is not None:
-    try:
-        filtered["Anomaly"] = model.predict(filtered[["Amount"]])
-        anomalies = filtered[filtered["Anomaly"] == -1]
+try:
+    model = IsolationForest(contamination=0.05, random_state=42)
+    model.fit(filtered[["Amount"]])
 
-        if anomalies.empty:
-            st.success("No unusual transactions detected ✅")
-        else:
-            st.warning(f"{len(anomalies)} unusual transactions found")
-            st.dataframe(anomalies)
-    except:
-        st.error("Model loaded but prediction failed. Check Amount column format.")
-else:
-    st.warning("No anomaly model found. Upload anomaly_model.pkl")
+    filtered["Anomaly"] = model.predict(filtered[["Amount"]])
+    anomalies = filtered[filtered["Anomaly"] == -1]
+
+    if anomalies.empty:
+        st.success("No unusual transactions detected ✅")
+    else:
+        st.warning(f"{len(anomalies)} unusual transactions found")
+        st.dataframe(anomalies)
+
+except:
+    st.error("Anomaly detection failed. Ensure Amount column is numeric.")
 
 
 st.subheader(" Financial Health Summary")
