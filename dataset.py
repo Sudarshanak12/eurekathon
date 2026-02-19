@@ -1,20 +1,16 @@
-# Install dependencies as needed:
-# pip install kagglehub[pandas-datasets]
+
 import kagglehub
 from kagglehub import KaggleDatasetAdapter
 
-# Set the path to the file you'd like to load
-file_path = ""
 
-# Load the latest version
+file_path = "C:\Users\Sudharshan\Desktop\hackathon\Dataset\archive"
+
 df = kagglehub.load_dataset(
   KaggleDatasetAdapter.PANDAS,
   "ismetsemedov/personal-budget-transactions-dataset",
   file_path,
-  # Provide any additional arguments like 
-  # sql_query or pandas_kwargs. See the 
-  # documenation for more information:
-  # https://github.com/Kaggle/kagglehub/blob/main/README.md#kaggledatasetadapterpandas
+com/Kaggle/kagglehub/blob/main/README.md
 )
+
 
 print("First 5 records:", df.head())
