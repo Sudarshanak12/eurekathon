@@ -7,7 +7,7 @@ st.set_page_config(page_title="Smart Spend Analyzer", layout="wide")
 st.title("💰 Smart Spend Analyzer")
 
 # Load files
-df = pd.read_csv("processed_finance.csv")
+df = pd.read_csv("Personal_Finance_Dataset.csv")
 model = joblib.load("anomaly_model.pkl")
 
 # Sidebar Filters
@@ -61,3 +61,4 @@ Average transaction amount is ₹{avg:.2f}.
 """
 
 st.info(summary)
+
